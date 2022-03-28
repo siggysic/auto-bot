@@ -16,7 +16,6 @@
 package fastfisheatslowfish
 
 import (
-	"context"
 	"fmt"
 	"log"
 	"runtime"
@@ -24,317 +23,335 @@ import (
 	"time"
 
 	"github.com/adshao/go-binance/v2/futures"
-	"github.com/bwmarrin/discordgo"
 	"github.com/juju/errors"
-	. "github.com/logrusorgru/aurora"
-	"github.com/saniales/golang-crypto-trading-bot/consts"
+	"github.com/saniales/golang-crypto-trading-bot/channel"
 	"github.com/saniales/golang-crypto-trading-bot/environment"
 	"github.com/saniales/golang-crypto-trading-bot/exchanges"
+	"github.com/saniales/golang-crypto-trading-bot/logger"
 	"github.com/saniales/golang-crypto-trading-bot/mongo"
 	"github.com/saniales/golang-crypto-trading-bot/strategies"
 )
 
-type MActiveType map[string]Actives
+type MActiveType map[string]mongo.Actives
 
-var discordBot *discordgo.Session
-var discordBotToken string
-var discordChannelId string
-var discordNotiGapMinute int64
-var discordNotiTime time.Time
-var interval = 10 * time.Second
+type FastFishEatSlowFish struct {
+	discordBot           channel.Channel
+	discordNotiGapMinute int64
+	discordNotiTime      time.Time
+	interval             time.Duration
+	mongoDB              *mongo.Mongo
+	mongoRepo            mongo.IMongoRepository
+	mactives             MActiveType
+	isSendNoti           bool
+	scheduleReports      []string
+	logger               logger.ILogger
+}
 
-var mongoDB *mongo.Mongo
-var mongoRepo *MongoRepository
-var mactives MActiveType = make(map[string]Actives)
-var isSendNoti = false
+func New(discordBot channel.Channel, discordNotiGapMinute int64, discordNotiTime time.Time,
+	interval time.Duration, mongoDB *mongo.Mongo, mongoRepo mongo.IMongoRepository, mactives MActiveType,
+	logger logger.ILogger) *FastFishEatSlowFish {
+	return &FastFishEatSlowFish{
+		discordBot:           discordBot,
+		discordNotiGapMinute: discordNotiGapMinute,
+		discordNotiTime:      discordNotiTime,
+		interval:             interval,
+		mongoDB:              mongoDB,
+		mongoRepo:            mongoRepo,
+		mactives:             mactives,
+		isSendNoti:           false,
+		scheduleReports:      []string{},
+		logger:               logger,
+	}
+}
 
 // FastFishEatSlowFish sends messages to a specified discord channel.
-var FastFishEatSlowFish = strategies.IntervalStrategy{
-	Model: strategies.StrategyModel{
-		Name: "FastFishEatSlowFish",
-		Setup: func(exchanges []exchanges.ExchangeWrapper, markets []*environment.Market) error {
-			log.Println("========== Setup ==========")
-			initDiscordBot(markets)
+func (svc *FastFishEatSlowFish) Running() strategies.IntervalStrategy {
+	return strategies.IntervalStrategy{
+		Model: strategies.StrategyModel{
+			Name: "FastFishEatSlowFish",
+			Setup: func(exchanges []exchanges.ExchangeWrapper, markets []*environment.Market) error {
+				discordBot := svc.discordBot
+				mongoRepo := svc.mongoRepo
+				mactives := svc.mactives
+				log.Println("========== Setup ==========")
 
-			for _, ex := range exchanges {
+				err := discordBot.Send(logger.ReportInitialBot(markets))
+				if err != nil {
+					return err
+				}
 
-				ex.SetHedgeMode(true)
+				for _, ex := range exchanges {
+					ex.SetHedgeMode(true)
 
-				for ind, market := range markets {
-					if len(market.Rounds) == 0 {
-						continue
-					}
-					var firstRound environment.CoinRounds
-					if len(market.Rounds) > 0 {
-						firstRound = market.Rounds[0]
-					}
-					positions, err := ex.GetBalances()
-					if err != nil {
-						return err
-					}
-					// Setup mongo
-					if ind == 0 {
-						mongoURI := market.CustomStorageM[consts.MongoURIStorage]
-						mongoDB, err = initMongoDB(mongoURI)
+					for _, market := range markets {
+						if len(market.Rounds) == 0 {
+							continue
+						}
+						var firstRound environment.CoinRounds
+						if len(market.Rounds) > 0 {
+							firstRound = market.Rounds[0]
+						}
+						positions, err := ex.GetBalances()
 						if err != nil {
 							return err
 						}
-						mongoRepo = NewMongoRepository(mongoDB)
-					}
+						botSymbol := toSymbol(market.BaseCurrency, market.MarketCurrency)
+						position := positionMatchers(botSymbol, firstRound.PositionType, positions)
 
-					botSymbol := toSymbol(market.BaseCurrency, market.MarketCurrency)
-					position := positionMatchers(botSymbol, firstRound.PositionType, positions)
-
-					log.Println("market name :", market.Name)
-					log.Println("isPosNil(position) :", isPosNil(position))
-					log.Printf("position : %+v\n", position)
-					if isPosNil(position) {
-						if len(market.Rounds) > 0 {
-							firstRound := market.Rounds[0]
-							err = initialAction(ex, market, position, firstRound, botSymbol, 0)
+						log.Println("market name :", market.Name)
+						log.Println("isPosNil(position) :", isPosNil(position))
+						log.Printf("position : %+v\n", position)
+						if isPosNil(position) {
+							if len(market.Rounds) > 0 {
+								firstRound := market.Rounds[0]
+								err = svc.initialAction(ex, market, position, firstRound, botSymbol, 0)
+								if err != nil {
+									log.Println(err)
+									return err
+								}
+							} else {
+								return errors.New("Config round is empty.")
+							}
+						} else {
+							act, err := mongoRepo.FindOneActivesWithSymbol(botSymbol)
 							if err != nil {
 								log.Println(err)
 								return err
 							}
-						} else {
-							return errors.New("Config round is empty.")
-						}
-					} else {
-						act, err := mongoRepo.FindOneActivesWithSymbol(botSymbol)
-						if err != nil {
-							log.Println(err)
-							return err
-						}
 
-						// Save in mem
-						mactives.Save(botSymbol, act.Amount, act.Side, act.Price, act.Round, act.HighestROE)
+							// Save in mem
+							mactives.Save(botSymbol, act.Amount, act.Side, act.Price, act.Round, act.HighestROE)
+						}
 					}
 				}
-			}
 
-			log.Println("========== Setup ==========")
+				log.Println("========== Setup ==========")
 
-			return nil
-		},
-		// ========
-		// OnUpdate
-		// ========
-		OnUpdate: func(exchanges []exchanges.ExchangeWrapper, markets []*environment.Market) error {
-			scheduleReports := []string{}
-			for _, ex := range exchanges {
+				return nil
+			},
+			// ========
+			// OnUpdate
+			// ========
+			OnUpdate: func(exchanges []exchanges.ExchangeWrapper, markets []*environment.Market) error {
+				discordBot := svc.discordBot
+				mongoRepo := svc.mongoRepo
+				mactives := svc.mactives
 
-				positions, err := ex.GetBalances()
-				if err != nil {
-					log.Println(err)
-					continue
-				}
-				for _, market := range markets {
-					if len(market.Rounds) == 0 {
+				for _, ex := range exchanges {
+
+					positions, err := ex.GetBalances()
+					if err != nil {
+						log.Println(err)
 						continue
 					}
-
-					var firstRound environment.CoinRounds
-					if len(market.Rounds) > 0 {
-						firstRound = market.Rounds[0]
-					}
-
-					botSymbol := toSymbol(market.BaseCurrency, market.MarketCurrency)
-					position := positionMatchers(botSymbol, firstRound.PositionType, positions)
-					var roe float64
-
-					if isPosNil(position) {
-						err = initialAction(ex, market, position, firstRound, botSymbol, 0)
-						if err != nil {
-							log.Println(err)
+					for _, market := range markets {
+						if len(market.Rounds) == 0 {
 							continue
 						}
-					} else {
-						activeMem := mactives.Get(botSymbol)
 
+						var firstRound environment.CoinRounds
 						if len(market.Rounds) > 0 {
-							var selectedRound *environment.CoinRounds
-							var nextRound *environment.CoinRounds
-							maxRound := len(market.Rounds)
-							for ind, round := range market.Rounds {
-								if round.Round == activeMem.Round {
-									selectedRound = &round
-									if ind+1 < maxRound {
-										nextRound = &market.Rounds[ind+1]
-									}
-									break
-								}
-							}
-							if selectedRound == nil {
-								log.Println("selectedRound == nil")
+							firstRound = market.Rounds[0]
+						}
+
+						botSymbol := toSymbol(market.BaseCurrency, market.MarketCurrency)
+						position := positionMatchers(botSymbol, firstRound.PositionType, positions)
+						var roe float64
+
+						if isPosNil(position) {
+							err = svc.initialAction(ex, market, position, firstRound, botSymbol, 0)
+							if err != nil {
+								log.Println(err)
 								continue
 							}
 
-							position = positionMatchers(botSymbol, selectedRound.PositionType, positions)
-							roe = calROE(position.UnrealizedProfit, position.InitialMargin)
+							svc.savePushMessages(botSymbol, position, roe)
+						} else {
+							activeMem := mactives.Get(botSymbol)
 
-							// Can close position
-							logRound(botSymbol, selectedRound, position, roe)
-							if roe >= selectedRound.Target {
-								if selectedRound.TargetType == environment.TrailingStopPercent && selectedRound.TrailingStopPercent != nil {
-									if activeMem.HighestROE != nil {
-										highestROE := *activeMem.HighestROE
-										diffTrailingROE := roe - highestROE
-										log.Println("activeMem.HighestROE : ", *activeMem.HighestROE)
-										log.Println("diffTrailingROE : ", diffTrailingROE)
-										if diffTrailingROE > 0 {
+							if len(market.Rounds) > 0 {
+								var selectedRound *environment.CoinRounds
+								var nextRound *environment.CoinRounds
+								maxRound := len(market.Rounds)
+								for ind, round := range market.Rounds {
+									if round.Round == activeMem.Round {
+										selectedRound = &round
+										if ind+1 < maxRound {
+											nextRound = &market.Rounds[ind+1]
+										}
+										break
+									}
+								}
+								if selectedRound == nil {
+									log.Println("selectedRound == nil")
+									continue
+								}
+
+								position = positionMatchers(botSymbol, selectedRound.PositionType, positions)
+								roe = calROE(position.UnrealizedProfit, position.InitialMargin)
+
+								// Can close position
+								svc.logger.LogPrice(&logger.LoggerData{BotSymbol: botSymbol, SelectedRound: selectedRound, Position: position, ROE: roe})
+								if roe >= selectedRound.Target {
+									if selectedRound.TargetType == environment.TrailingStopPercent && selectedRound.TrailingStopPercent != nil {
+										if activeMem.HighestROE != nil {
+											highestROE := *activeMem.HighestROE
+											diffTrailingROE := roe - highestROE
+											log.Println("activeMem.HighestROE : ", *activeMem.HighestROE)
+											log.Println("diffTrailingROE : ", diffTrailingROE)
+											if diffTrailingROE > 0 {
+												// Save in mem
+												mactives.SaveROE(botSymbol, &roe)
+
+												log.Printf("update diffTrailingROE > 0 with %+v\n", mactives.Get(botSymbol))
+												// Save in mongo
+												err = mongoRepo.FindAndUpdateAction(mactives.Get(botSymbol))
+												if err != nil {
+													log.Println(err)
+													continue
+												}
+											} else if diffTrailingROE < 0 {
+												{
+													// calCurrentRoe := roe + diffTrailingROE
+													log.Println("selectedRound.TrailingStopPercent : ", *selectedRound.TrailingStopPercent)
+													if -diffTrailingROE >= *selectedRound.TrailingStopPercent || roe <= selectedRound.Target {
+														// Close posiiton
+														var closeOrder *futures.CreateOrderResponse
+														amt, err := strconv.ParseFloat(position.PositionAmt, 64)
+														if err != nil {
+															log.Println(err)
+															continue
+														}
+
+														closeOrder, err = svc.closePosition(ex, market, position, botSymbol, *selectedRound, amt, roe)
+														if err != nil {
+															log.Println(err)
+															continue
+														}
+
+														// Push message
+														report := logger.ReportClosePosition(closeOrder.Symbol, closeOrder.ClientOrderID, closeOrder.OrderID, string(closeOrder.Type), string(closeOrder.Status), closeOrder.Price, position.UnrealizedProfit, roe, selectedRound.Round)
+														err = discordBot.Send(report)
+														if err != nil {
+															log.Println(err)
+															continue
+														}
+
+														// Initial action
+														err = svc.initialAction(ex, market, position, firstRound, botSymbol, 0)
+														if err != nil {
+															log.Println(err)
+															continue
+														}
+													}
+												}
+											}
+										} else if activeMem.HighestROE == nil || roe > *activeMem.HighestROE {
 											// Save in mem
 											mactives.SaveROE(botSymbol, &roe)
 
-											log.Printf("update diffTrailingROE > 0 with %+v\n", mactives.Get(botSymbol))
+											log.Printf("update activeMem.HighestROE == nil || roe > *activeMem.HighestROE with %+v\n", mactives.Get(botSymbol))
+
 											// Save in mongo
 											err = mongoRepo.FindAndUpdateAction(mactives.Get(botSymbol))
 											if err != nil {
 												log.Println(err)
 												continue
 											}
-										} else if diffTrailingROE < 0 {
-											{
-												// calCurrentRoe := roe + diffTrailingROE
-												log.Println("selectedRound.TrailingStopPercent : ", *selectedRound.TrailingStopPercent)
-												if -diffTrailingROE >= *selectedRound.TrailingStopPercent || roe <= selectedRound.Target {
-													// Close posiiton
-													var closeOrder *futures.CreateOrderResponse
-													amt, err := strconv.ParseFloat(position.PositionAmt, 64)
-													if err != nil {
-														log.Println(err)
-														continue
-													}
+										}
+									} else if selectedRound.TargetType == environment.FixedPercentTarget || selectedRound.TrailingStopPercent == nil {
+										if roe >= selectedRound.Target {
+											// Close posiiton
+											var closeOrder *futures.CreateOrderResponse
+											amt, err := strconv.ParseFloat(position.PositionAmt, 64)
+											if err != nil {
+												log.Println(err)
+												continue
+											}
 
-													closeOrder, err = closePosition(ex, market, position, botSymbol, *selectedRound, amt, roe)
-													if err != nil {
-														log.Println(err)
-														continue
-													}
+											closeOrder, err = svc.closePosition(ex, market, position, botSymbol, *selectedRound, amt, roe)
+											if err != nil {
+												log.Println(err)
+												continue
+											}
 
-													// Push message
-													report := reportClosePosition(closeOrder.Symbol, closeOrder.ClientOrderID, closeOrder.OrderID, string(closeOrder.Type), string(closeOrder.Status), closeOrder.Price, position.UnrealizedProfit, roe, selectedRound.Round)
-													_, err = discordBot.ChannelMessageSend(discordChannelId, report)
-													if err != nil {
-														log.Println(err)
-														continue
-													}
+											// Push message
+											report := logger.ReportClosePosition(closeOrder.Symbol, closeOrder.ClientOrderID, closeOrder.OrderID, string(closeOrder.Type), string(closeOrder.Status), closeOrder.Price, position.UnrealizedProfit, roe, selectedRound.Round)
+											err = discordBot.Send(report)
+											if err != nil {
+												log.Println(err)
+												continue
+											}
 
-													// Initial action
-													err = initialAction(ex, market, position, firstRound, botSymbol, 0)
-													if err != nil {
-														log.Println(err)
-														continue
-													}
-												}
+											// Initial action
+											err = svc.initialAction(ex, market, position, firstRound, botSymbol, 0)
+											if err != nil {
+												log.Println(err)
+												continue
 											}
 										}
-									} else if activeMem.HighestROE == nil || roe > *activeMem.HighestROE {
-										// Save in mem
-										mactives.SaveROE(botSymbol, &roe)
-
-										log.Printf("update activeMem.HighestROE == nil || roe > *activeMem.HighestROE with %+v\n", mactives.Get(botSymbol))
-
-										// Save in mongo
-										err = mongoRepo.FindAndUpdateAction(mactives.Get(botSymbol))
-										if err != nil {
-											log.Println(err)
-											continue
-										}
-									}
-								} else if selectedRound.TargetType == environment.FixedPercentTarget || selectedRound.TrailingStopPercent == nil {
-									if roe >= selectedRound.Target {
-										// Close posiiton
-										var closeOrder *futures.CreateOrderResponse
-										amt, err := strconv.ParseFloat(position.PositionAmt, 64)
-										if err != nil {
-											log.Println(err)
-											continue
-										}
-
-										closeOrder, err = closePosition(ex, market, position, botSymbol, *selectedRound, amt, roe)
-										if err != nil {
-											log.Println(err)
-											continue
-										}
-
-										// Push message
-										report := reportClosePosition(closeOrder.Symbol, closeOrder.ClientOrderID, closeOrder.OrderID, string(closeOrder.Type), string(closeOrder.Status), closeOrder.Price, position.UnrealizedProfit, roe, selectedRound.Round)
-										_, err = discordBot.ChannelMessageSend(discordChannelId, report)
-										if err != nil {
-											log.Println(err)
-											continue
-										}
-
-										// Initial action
-										err = initialAction(ex, market, position, firstRound, botSymbol, 0)
-										if err != nil {
-											log.Println(err)
-											continue
-										}
 									}
 								}
-							}
 
-							// Can open poisiton
-							if nextRound == nil {
-								log.Println("Reached max round")
-								continue
-							}
-							if roe <= -nextRound.Signal {
-								err = initialAction(ex, market, position, *nextRound, botSymbol, roe)
-								if err != nil {
-									log.Println(err)
+								svc.savePushMessages(botSymbol, position, roe)
+
+								// Can open poisiton
+								if nextRound == nil {
+									log.Println("Reached max round")
 									continue
 								}
+								if roe <= -nextRound.Signal {
+									err = svc.initialAction(ex, market, position, *nextRound, botSymbol, roe)
+									if err != nil {
+										log.Println(err)
+										continue
+									}
+								}
 							}
 						}
 					}
-
-					defer func() {
-						// Ticker noti current position accounts
-						if isSendNoti {
-							// Push message
-							report := reportCurrentPositions(botSymbol, position.PositionAmt, position.UnrealizedProfit, roe, position.Leverage, string(position.PositionSide))
-							scheduleReports = append(scheduleReports, report)
+				}
+				// Ticker noti current position accounts
+				svc.isSendNoti = beforeExitUpdate(svc.discordNotiTime)
+				if svc.isSendNoti {
+					svc.discordNotiTime = addNotiTime(svc.discordNotiTime, svc.discordNotiGapMinute)
+				}
+				if len(svc.scheduleReports) > 0 {
+					for _, report := range svc.scheduleReports {
+						err := discordBot.Send(report)
+						if err != nil {
+							log.Println(err)
 						}
-					}()
-				}
-			}
-			// Ticker noti current position accounts
-			isSendNoti = beforeExitUpdate(discordNotiTime)
-			if len(scheduleReports) > 0 {
-				discordNotiTime = initUpdate(discordNotiTime, discordNotiGapMinute)
-
-				for _, report := range scheduleReports {
-					_, err := discordBot.ChannelMessageSend(discordChannelId, report)
-					if err != nil {
-						log.Println(err)
 					}
-				}
 
-				scheduleReports = []string{}
-			}
-			return nil
+					svc.scheduleReports = []string{}
+				}
+				return nil
+			},
+			OnError: func(err error) {
+				discordBot := svc.discordBot
+				mongoDB := svc.mongoDB
+				pc, fn, line, _ := runtime.Caller(1)
+				log.Printf("[error] %s in %s[%s:%d] %v", err, runtime.FuncForPC(pc).Name(), fn, line, err)
+				discordBot.Close()
+				mongoDB.Disconnect()
+			},
+			TearDown: func([]exchanges.ExchangeWrapper, []*environment.Market) error {
+				discordBot := svc.discordBot
+				mongoDB := svc.mongoDB
+				err := discordBot.Close()
+				if err != nil {
+					return err
+				}
+				mongoDB.Disconnect()
+				return nil
+			},
 		},
-		OnError: func(err error) {
-			pc, fn, line, _ := runtime.Caller(1)
-			log.Printf("[error] %s in %s[%s:%d] %v", err, runtime.FuncForPC(pc).Name(), fn, line, err)
-			discordBot.Close()
-			mongoDB.Disconnect()
-		},
-		TearDown: func([]exchanges.ExchangeWrapper, []*environment.Market) error {
-			err := discordBot.Close()
-			if err != nil {
-				return err
-			}
-			mongoDB.Disconnect()
-			return nil
-		},
-	},
-	Interval: interval,
+		Interval: svc.interval,
+	}
 }
 
-func initUpdate(t time.Time, addMin int64) time.Time {
+func addNotiTime(t time.Time, addMin int64) time.Time {
 	return addTimeNoti(t, addMin)
 }
 
@@ -389,51 +406,7 @@ func isPosNil(position *futures.AccountPosition) bool {
 	return position.InitialMargin == "0"
 }
 
-func initDiscordBot(markets []*environment.Market) error {
-	// Create a new Discord session using the provided bot token.
-	var err error
-	now := time.Now()
-	discordBotToken = markets[0].CustomStorageM[consts.DiscordTokenStorage]
-	discordChannelId = markets[0].CustomStorageM[consts.DiscordChannelIdStorage]
-	discordNotiGapMinute, _ = strconv.ParseInt(markets[0].CustomStorageM[consts.DiscordNotiGapMinuteStorage], 10, 0)
-	discordNotiTime = addTimeNoti(now, discordNotiGapMinute)
-	discordBot, err = discordgo.New("Bot " + discordBotToken)
-	if err != nil {
-		return err
-	}
-
-	go func() {
-		err = discordBot.Open()
-		if err != nil {
-			return
-		}
-	}()
-
-	//sleep some time
-	time.Sleep(time.Second * 5)
-	if err != nil {
-		return err
-	}
-	_, err = discordBot.ChannelMessageSend(discordChannelId, reportInitialBot(markets))
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func initMongoDB(mongoURI string) (*mongo.Mongo, error) {
-	ctx, _ := context.WithTimeout(context.Background(), 10*time.Second)
-
-	mong := mongo.NewMongo(ctx, mongoURI)
-	err := mong.Connect()
-	if err != nil {
-		return nil, err
-	}
-	return mong, nil
-}
-
-func initialAction(ex exchanges.ExchangeWrapper, market *environment.Market, position *futures.AccountPosition, round environment.CoinRounds, botSymbol string, roe float64) error {
+func (svc *FastFishEatSlowFish) initialAction(ex exchanges.ExchangeWrapper, market *environment.Market, position *futures.AccountPosition, round environment.CoinRounds, botSymbol string, roe float64) error {
 	err := ex.SetLeverage(market, round.Leverage)
 	if err != nil {
 		return err
@@ -442,7 +415,7 @@ func initialAction(ex exchanges.ExchangeWrapper, market *environment.Market, pos
 	clientOrderId := ""
 	var orderId int64
 	if round.PositionType == environment.BuyPosition {
-		order, err := ex.BuyMarket(market, round.Amount)
+		order, err := ex.BuyMarket(market, round.Amount, futures.PositionSideType(round.PositionType))
 		if err != nil {
 			log.Println(err)
 			return err
@@ -452,14 +425,14 @@ func initialAction(ex exchanges.ExchangeWrapper, market *environment.Market, pos
 		orderId = order.OrderID
 
 		// Push message
-		report := reportBuyMarket(order.Symbol, order.ClientOrderID, order.OrderID, string(order.Type), round.Leverage, string(order.Side), string(order.Status), fmt.Sprint(round.Amount))
-		_, err = discordBot.ChannelMessageSend(discordChannelId, report)
+		report := logger.ReportBuyMarket(order.Symbol, order.ClientOrderID, order.OrderID, string(order.Type), round.Leverage, string(order.Side), string(order.Status), fmt.Sprint(round.Amount))
+		err = svc.discordBot.Send(report)
 		if err != nil {
 			return err
 		}
 
 	} else if round.PositionType == environment.SellPosiiton {
-		order, err := ex.SellMarket(market, round.Amount)
+		order, err := ex.SellMarket(market, round.Amount, futures.PositionSideType(round.PositionType))
 		if err != nil {
 			log.Println(err)
 			return err
@@ -469,8 +442,8 @@ func initialAction(ex exchanges.ExchangeWrapper, market *environment.Market, pos
 		orderId = order.OrderID
 
 		// Push message
-		report := reportSellMarket(order.Symbol, order.ClientOrderID, order.OrderID, string(order.Type), round.Leverage, string(order.Side), string(order.Status), fmt.Sprint(round.Amount))
-		_, err = discordBot.ChannelMessageSend(discordChannelId, report)
+		report := logger.ReportSellMarket(order.Symbol, order.ClientOrderID, order.OrderID, string(order.Type), round.Leverage, string(order.Side), string(order.Status), fmt.Sprint(round.Amount))
+		err = svc.discordBot.Send(report)
 		if err != nil {
 			return err
 		}
@@ -497,22 +470,22 @@ func initialAction(ex exchanges.ExchangeWrapper, market *environment.Market, pos
 	}
 
 	// Save in mem
-	mactives.Save(botSymbol, amt, side, price, round.Round, nil)
+	svc.mactives.Save(botSymbol, amt, side, price, round.Round, nil)
 
-	log.Printf("update environment.BuyPosition with %+v\n", mactives.Get(botSymbol))
+	log.Printf("update environment.BuyPosition with %+v\n", svc.mactives.Get(botSymbol))
 	// Save in mongo
-	err = mongoRepo.FindAndUpdateAction(mactives.Get(botSymbol))
+	err = svc.mongoRepo.FindAndUpdateAction(svc.mactives.Get(botSymbol))
 	if err != nil {
 		log.Println(err)
 	}
 
 	// Save log event
-	logs := Logs{
+	logs := mongo.Logs{
 		ClientOrderID: clientOrderId, OrderID: int64(orderId), Symbol: botSymbol, Amount: amt,
 		Leverage: lv, Side: "BUY", Position: ps, Round: round.Round,
 		Price: price, Profilt: up, ROE: roe, CreatedAt: time.Now(),
 	}
-	err = mongoRepo.CreateLog(logs)
+	err = svc.mongoRepo.CreateLog(logs)
 	if err != nil {
 		log.Println(err)
 		return err
@@ -521,18 +494,18 @@ func initialAction(ex exchanges.ExchangeWrapper, market *environment.Market, pos
 	return nil
 }
 
-func closePosition(
+func (svc *FastFishEatSlowFish) closePosition(
 	ex exchanges.ExchangeWrapper, market *environment.Market, position *futures.AccountPosition,
 	botSymbol string, selectedRound environment.CoinRounds, amt float64, roe float64) (closeOrder *futures.CreateOrderResponse, err error) {
 
 	if selectedRound.PositionType == environment.BuyPosition {
-		closeOrder, err = ex.SellMarket(market, amt)
+		closeOrder, err = ex.SellMarket(market, amt, futures.PositionSideType(selectedRound.PositionType))
 		if err != nil {
 			return nil, err
 		}
 
 	} else {
-		closeOrder, err = ex.BuyMarket(market, amt)
+		closeOrder, err = ex.BuyMarket(market, amt, futures.PositionSideType(selectedRound.PositionType))
 		if err != nil {
 			return nil, err
 		}
@@ -547,12 +520,12 @@ func closePosition(
 		exitPrice := entryPrice + diffPrice
 
 		// Save log event
-		logs := Logs{
+		logs := mongo.Logs{
 			ClientOrderID: closeOrder.ClientOrderID, OrderID: closeOrder.OrderID, Symbol: botSymbol, Amount: fmt.Sprintf("%f", amt),
 			Leverage: position.Leverage, Side: "SELL", Position: string(position.PositionSide), Round: selectedRound.Round,
 			Price: fmt.Sprintf("%f", exitPrice), Profilt: position.UnrealizedProfit, ROE: roe, CreatedAt: time.Now(),
 		}
-		err = mongoRepo.CreateLog(logs)
+		err = svc.mongoRepo.CreateLog(logs)
 		if err != nil {
 			return nil, err
 		}
@@ -561,23 +534,17 @@ func closePosition(
 	return closeOrder, nil
 }
 
-func logRound(botSymbol string, selectedRound *environment.CoinRounds, position *futures.AccountPosition, roe float64) {
-	roeColor := Green(roe)
-	unrealizedProfColor := Green(position.UnrealizedProfit)
-	if roe < 0 {
-		roeColor = Red(roe)
-		unrealizedProfColor = Red(position.UnrealizedProfit)
+func (svc *FastFishEatSlowFish) savePushMessages(botSymbol string, position *futures.AccountPosition, roe float64) {
+	// Ticker noti current position accounts
+	if svc.isSendNoti {
+		// Push message
+		report := logger.ReportCurrentPositions(botSymbol, position.PositionAmt, position.UnrealizedProfit, roe, position.Leverage, string(position.PositionSide))
+		svc.scheduleReports = append(svc.scheduleReports, report)
 	}
-	header := fmt.Sprintf("\n==== [%s] Round %d ====", botSymbol, selectedRound.Round)
-	body := fmt.Sprintf("\t [%s] Target: %f %% Current: %f %%\n", selectedRound.TargetType, Magenta(selectedRound.Target), roeColor)
-	body = body + fmt.Sprintf("%s\n", Cyan("---- Position ----"))
-	body = body + fmt.Sprintf("\t Entry price: %s Leverage: %s Position: %s[%s] Unrealized profit: %s USDT",
-		Brown(position.EntryPrice), Yellow(position.Leverage), Yellow(position.PositionAmt), Yellow(position.PositionSide), unrealizedProfColor)
-	log.Printf("%s\n%s\n", Cyan(header), body)
 }
 
 func (m MActiveType) Save(symbol, amount, side, price string, round int, hroe *float64) {
-	m[symbol] = Actives{
+	m[symbol] = mongo.Actives{
 		Symbol:     symbol,
 		Amount:     amount,
 		Side:       side,
@@ -594,7 +561,7 @@ func (m MActiveType) SaveROE(symbol string, hroe *float64) {
 	}
 }
 
-func (m MActiveType) Get(symbol string) Actives {
+func (m MActiveType) Get(symbol string) mongo.Actives {
 	return m[symbol]
 }
 

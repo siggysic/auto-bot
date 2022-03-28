@@ -1,0 +1,246 @@
+mongo_uri: mongodb://mfoa-admin:mfoa-admin%40dev@localhost:27017
+discord_token: OTA1ODYwNDQyMjEwMDQ2MDA1.YYQORw.Uc2wvE9MAKKnL34CWzyzTifF1Bs
+discord_channel_id: "905862680387145789"
+discord_noti_gap_minute: 20
+simulation_mode: false # if you want to enable simulation mode.
+exchange_configs:
+  - exchange: binance_future
+    public_key: d7d35a956839ccfd19683823cf8ccb37900a905c28b229177a636709e69a807d
+    secret_key: 8121db0f2dfb2a9796b22cfee2843663839a79452f67af88cbc0d8e46e60ef23
+    deposit_addresses:
+      BTC: binance_deposit_address_btc
+      ETH: binance_deposit_address_eth
+      ZEC: binance_deposit_address_zec
+strategies:
+  - strategy: FastFishEatSlowFish
+    markets:
+      - market: BTC-USDT
+        bindings:
+        - exchange: binance_future
+          market_name: BTCUSDT
+          margin_type: CROSSED # CROSSED, ISOLATED
+          order_type: MARKET # MARKET, LIMIT
+          rounds:
+            - round: 1
+              amount: 0.001 # size
+              position_type: LONG # LONG, SHORT
+              leverage: 3 # 1-125x
+              signal: 0
+              signal_type : COIN_PERCENT # COIN_PERCENT
+              target: 1.3 # {number}
+              target_type: FIXED_PERCENT # FIXED_PERCENT, TRAILING_STOP_PERCENT
+              
+            - round: 2
+              amount: 0.001
+              position_type: LONG
+              leverage: 4
+              signal: 2
+              signal_type : COIN_PERCENT
+              target: 1.3
+              target_type: FIXED_PERCENT
+
+            - round: 3
+              amount: 0.002
+              position_type: LONG
+              leverage: 4
+              signal: 2
+              signal_type : COIN_PERCENT
+              target: 1.3
+              target_type: TRAILING_STOP_PERCENT
+              trailing_acceptable_percent: 0.3
+
+            - round: 4
+              amount: 0.002
+              position_type: LONG
+              leverage: 4
+              signal: 2
+              signal_type : COIN_PERCENT
+              target: 1.3
+              target_type: TRAILING_STOP_PERCENT
+              trailing_acceptable_percent: 0.3
+
+            - round: 5
+              amount: 0.003
+              position_type: LONG
+              leverage: 4
+              signal: 3
+              signal_type : COIN_PERCENT
+              target: 1.3
+              target_type: TRAILING_STOP_PERCENT
+              trailing_acceptable_percent: 0.3
+
+            - round: 6
+              amount: 0.003
+              position_type: LONG
+              leverage: 4
+              signal: 3
+              signal_type : COIN_PERCENT
+              target: 1.3
+              target_type: TRAILING_STOP_PERCENT
+              trailing_acceptable_percent: 0.3
+
+            - round: 7
+              amount: 0.005
+              position_type: LONG
+              leverage: 5
+              signal: 4
+              signal_type : COIN_PERCENT
+              target: 1.3
+              target_type: TRAILING_STOP_PERCENT
+              trailing_acceptable_percent: 0.3
+      
+      - market: ETH-USDT
+        bindings:
+        - exchange: binance_future
+          market_name: ETHUSDT
+          margin_type: CROSSED # CROSSED, ISOLATED
+          order_type: MARKET # MARKET, LIMIT
+          rounds:
+            - round: 1
+              amount: 0.02
+              position_type: LONG # LONG, SELL
+              leverage: 2 # 1-125x
+              signal: 0
+              signal_type : COIN_PERCENT # COIN_PERCENT
+              target: 1.3 # {number}
+              target_type: FIXED_PERCENT # FIXED_PERCENT, TRAILING_STOP_PERCENT
+              
+            - round: 2
+              amount: 0.02
+              position_type: LONG
+              leverage: 3
+              signal: 1.2
+              signal_type : COIN_PERCENT
+              target: 1.5
+              target_type: FIXED_PERCENT
+
+            - round: 3
+              amount: 0.04
+              position_type: LONG
+              leverage: 4
+              signal: 1.2
+              signal_type : COIN_PERCENT
+              target: 1.5
+              target_type: TRAILING_STOP_PERCENT
+              trailing_acceptable_percent: 0.3
+
+            - round: 4
+              amount: 0.04
+              position_type: LONG
+              leverage: 4
+              signal: 1.3
+              signal_type : COIN_PERCENT
+              target: 1.5
+              target_type: TRAILING_STOP_PERCENT
+              trailing_acceptable_percent: 0.3
+
+            - round: 5
+              amount: 0.07
+              position_type: LONG
+              leverage: 5
+              signal: 1.7
+              signal_type : COIN_PERCENT
+              target: 1.8
+              target_type: TRAILING_STOP_PERCENT
+              trailing_acceptable_percent: 0.3
+
+            - round: 6
+              amount: 0.07
+              position_type: LONG
+              leverage: 5
+              signal: 1.9
+              signal_type : COIN_PERCENT
+              target: 1.8
+              target_type: TRAILING_STOP_PERCENT
+              trailing_acceptable_percent: 0.3
+
+            - round: 7
+              amount: 0.1
+              position_type: LONG
+              leverage: 6
+              signal: 2.1
+              signal_type : COIN_PERCENT
+              target: 2
+              target_type: TRAILING_STOP_PERCENT
+              trailing_acceptable_percent: 0.3
+
+            - round: 8
+              amount: 0.15
+              position_type: LONG
+              leverage: 7
+              signal: 2.5
+              signal_type : COIN_PERCENT
+              target: 2.3
+              target_type: TRAILING_STOP_PERCENT
+              trailing_acceptable_percent: 0.3
+
+            - round: 9
+              amount: 0.2
+              position_type: LONG
+              leverage: 7
+              signal: 3.2
+              signal_type : COIN_PERCENT
+              target: 2.3
+              target_type: TRAILING_STOP_PERCENT
+              trailing_acceptable_percent: 0.3
+
+            - round: 10
+              amount: 0.25
+              position_type: LONG
+              leverage: 7
+              signal: 4
+              signal_type : COIN_PERCENT
+              target: 2.3
+              target_type: TRAILING_STOP_PERCENT
+              trailing_acceptable_percent: 0.3
+      - market: BNB-USDT
+        bindings:
+        - exchange: binance_future
+          market_name: BNBUSDT
+          margin_type: CROSSED # CROSSED, ISOLATED
+          order_type: MARKET # MARKET, LIMIT
+          rounds:
+            - round: 1
+              amount: 0.1
+              position_type: LONG # LONG, SELL
+              leverage: 3 # 1-125x
+              signal: 0
+              signal_type : COIN_PERCENT # COIN_PERCENT
+              target: 2 # {number}
+              target_type: FIXED_PERCENT # FIXED_PERCENT, TRAILING_STOP_PERCENT
+              
+            - round: 2
+              amount: 0.1
+              position_type: LONG
+              leverage: 3
+              signal: 1
+              signal_type : COIN_PERCENT
+              target: 2
+              target_type: FIXED_PERCENT
+
+            - round: 3
+              amount: 0.2
+              position_type: LONG
+              leverage: 4
+              signal: 3
+              signal_type : COIN_PERCENT
+              target: 2
+              target_type: FIXED_PERCENT
+
+            - round: 4
+              amount: 0.5
+              position_type: LONG
+              leverage: 5
+              signal: 4
+              signal_type : COIN_PERCENT
+              target: 3
+              target_type: FIXED_PERCENT
+
+            - round: 5
+              amount: 0.5
+              position_type: LONG
+              leverage: 5
+              signal: 5
+              signal_type : COIN_PERCENT
+              target: 3
+              target_type: FIXED_PERCENT

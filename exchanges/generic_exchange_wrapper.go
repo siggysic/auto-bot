@@ -35,15 +35,15 @@ const (
 
 //ExchangeWrapper provides a generic wrapper for exchange services.
 type ExchangeWrapper interface {
-	Name() string                                                                    // Gets the name of the exchange.
-	GetCandles(market *environment.Market) ([]environment.CandleStick, error)        // Gets the candle data from the exchange.
-	GetMarketSummary(market *environment.Market) (*environment.MarketSummary, error) // Gets the current market summary.
-	GetOrderBook(market *environment.Market) (*environment.OrderBook, error)         // Gets the order(ASK + BID) book of a market.
+	Name() string                                                                                                          // Gets the name of the exchange.
+	GetCandles(market *environment.Market, interval string, startTime, endTime int64, limit int) ([]*futures.Kline, error) // Gets the candle data from the exchange.
+	GetMarketSummary(market *environment.Market) (*environment.MarketSummary, error)                                       // Gets the current market summary.
+	GetOrderBook(market *environment.Market) (*environment.OrderBook, error)                                               // Gets the order(ASK + BID) book of a market.
 
-	BuyLimit(market *environment.Market, amount float64, limit float64) (string, error)          // Performs a limit buy action.
-	SellLimit(market *environment.Market, amount float64, limit float64) (string, error)         // Performs a limit sell action.
-	BuyMarket(market *environment.Market, amount float64) (*futures.CreateOrderResponse, error)  // Performs a market buy action.
-	SellMarket(market *environment.Market, amount float64) (*futures.CreateOrderResponse, error) // Performs a market sell action.
+	BuyLimit(market *environment.Market, amount float64, limit float64) (string, error)                                         // Performs a limit buy action.
+	SellLimit(market *environment.Market, amount float64, limit float64) (string, error)                                        // Performs a limit sell action.
+	BuyMarket(market *environment.Market, amount float64, side futures.PositionSideType) (*futures.CreateOrderResponse, error)  // Performs a market buy action.
+	SellMarket(market *environment.Market, amount float64, side futures.PositionSideType) (*futures.CreateOrderResponse, error) // Performs a market sell action.
 
 	ClosePosition(market *environment.Market, side environment.PositionType) (*futures.CreateOrderResponse, error)
 

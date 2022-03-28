@@ -1,6 +1,7 @@
 package helpers
 
 import (
+	"github.com/saniales/golang-crypto-trading-bot/backtest/backtesthelps"
 	"github.com/saniales/golang-crypto-trading-bot/environment"
 	"github.com/saniales/golang-crypto-trading-bot/exchanges"
 	"github.com/shopspring/decimal"
@@ -24,6 +25,15 @@ func InitExchange(exchangeConfig environment.ExchangeConfig, simulatedMode bool,
 	// 	exch = exchanges.NewBinanceWrapper(exchangeConfig.PublicKey, exchangeConfig.SecretKey, depositAddresses)
 	case "binance_future":
 		exch = exchanges.NewBinanceFutureWrapper(exchangeConfig.PublicKey, exchangeConfig.SecretKey, depositAddresses)
+	case "binance_future_backtest":
+
+		// FES
+		// symbols := backtesthelps.ReadFESFileCSV()
+
+		// EMA
+		symbols := backtesthelps.ReadEMAFileCSV()
+
+		exch = exchanges.NewBinanceFutureBackTestWrapper(symbols)
 	// case "bitfinex":
 	// 	exch = exchanges.NewBitfinexWrapper(exchangeConfig.PublicKey, exchangeConfig.SecretKey, depositAddresses)
 	// case "hitbtc":

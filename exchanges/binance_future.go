@@ -165,8 +165,8 @@ func (wrapper *BinanceFutureWrapper) SellLimit(market *environment.Market, amoun
 }
 
 // BuyMarket performs a market buy action.
-func (wrapper *BinanceFutureWrapper) BuyMarket(market *environment.Market, amount float64) (*futures.CreateOrderResponse, error) {
-	orderNumber, err := wrapper.api.NewCreateOrderService().Type(futures.OrderTypeMarket).Side(futures.SideTypeBuy).PositionSide(futures.PositionSideTypeLong).Symbol(MarketNameFor(market, wrapper)).Quantity(fmt.Sprint(amount)).Do(context.Background())
+func (wrapper *BinanceFutureWrapper) BuyMarket(market *environment.Market, amount float64, side futures.PositionSideType) (*futures.CreateOrderResponse, error) {
+	orderNumber, err := wrapper.api.NewCreateOrderService().Type(futures.OrderTypeMarket).Side(futures.SideTypeBuy).PositionSide(side).Symbol(MarketNameFor(market, wrapper)).Quantity(fmt.Sprint(amount)).Do(context.Background())
 	if err != nil {
 		log.Println(err)
 		return nil, err
@@ -176,8 +176,8 @@ func (wrapper *BinanceFutureWrapper) BuyMarket(market *environment.Market, amoun
 }
 
 // SellMarket performs a market sell action.
-func (wrapper *BinanceFutureWrapper) SellMarket(market *environment.Market, amount float64) (*futures.CreateOrderResponse, error) {
-	orderNumber, err := wrapper.api.NewCreateOrderService().Type(futures.OrderTypeMarket).Side(futures.SideTypeSell).PositionSide(futures.PositionSideTypeLong).Symbol(MarketNameFor(market, wrapper)).Quantity(fmt.Sprint(amount)).Do(context.Background())
+func (wrapper *BinanceFutureWrapper) SellMarket(market *environment.Market, amount float64, side futures.PositionSideType) (*futures.CreateOrderResponse, error) {
+	orderNumber, err := wrapper.api.NewCreateOrderService().Type(futures.OrderTypeMarket).Side(futures.SideTypeSell).PositionSide(side).Symbol(MarketNameFor(market, wrapper)).Quantity(fmt.Sprint(amount)).Do(context.Background())
 	if err != nil {
 		log.Println(err)
 		return nil, err
@@ -253,40 +253,24 @@ func (wrapper *BinanceFutureWrapper) GetMarketSummary(market *environment.Market
 }
 
 // GetCandles gets the candle data from the exchange.
-func (wrapper *BinanceFutureWrapper) GetCandles(market *environment.Market) ([]environment.CandleStick, error) {
-	if !wrapper.websocketOn {
-		binanceCandles, err := wrapper.api.NewKlinesService().Symbol(MarketNameFor(market, wrapper)).Do(context.Background())
-		if err != nil {
-			return nil, err
-		}
+func (wrapper *BinanceFutureWrapper) GetCandles(market *environment.Market, interval string, startTime, endTime int64, limit int) ([]*futures.Kline, error) {
+	klines := wrapper.api.NewKlinesService().
+		Symbol(MarketNameFor(market, wrapper)).
+		Interval(interval)
 
-		ret := make([]environment.CandleStick, len(binanceCandles))
-
-		for i, binanceCandle := range binanceCandles {
-			high, _ := decimal.NewFromString(binanceCandle.High)
-			open, _ := decimal.NewFromString(binanceCandle.Open)
-			close, _ := decimal.NewFromString(binanceCandle.Close)
-			low, _ := decimal.NewFromString(binanceCandle.Low)
-			volume, _ := decimal.NewFromString(binanceCandle.Volume)
-
-			ret[i] = environment.CandleStick{
-				High:   high,
-				Open:   open,
-				Close:  close,
-				Low:    low,
-				Volume: volume,
-			}
-		}
-
-		wrapper.candles.Set(market, ret)
+	if startTime != 0 && endTime != 0 {
+		klines.StartTime(startTime).EndTime(endTime)
 	}
 
-	ret, candleLoaded := wrapper.candles.Get(market)
-	if !candleLoaded {
-		return nil, errors.New("No candle data yet")
+	if limit != 0 {
+		klines.Limit(limit)
 	}
 
-	return ret, nil
+	binanceCandles, err := klines.Do(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	return binanceCandles, nil
 }
 
 // GetBalances gets the balance of the user

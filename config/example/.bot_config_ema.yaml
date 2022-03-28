@@ -1,0 +1,57 @@
+mongo_uri: mongodb://mfoa-admin:mfoa-admin%40dev@localhost:27017
+discord_token: OTA1ODYwNDQyMjEwMDQ2MDA1.YYQORw.Uc2wvE9MAKKnL34CWzyzTifF1Bs
+discord_channel_id: "905862680387145789"
+discord_noti_gap_minute: 20
+simulation_mode: false # if you want to enable simulation mode.
+exchange_configs:
+  - exchange: binance_future
+    public_key: d7d35a956839ccfd19683823cf8ccb37900a905c28b229177a636709e69a807d
+    secret_key: 8121db0f2dfb2a9796b22cfee2843663839a79452f67af88cbc0d8e46e60ef23
+    deposit_addresses:
+      BTC: binance_deposit_address_btc
+      ETH: binance_deposit_address_eth
+      ZEC: binance_deposit_address_zec
+strategies:
+  - strategy: EMA
+    markets:
+      - market: BTC-USDT
+        bindings:
+        - exchange: binance_future
+          market_name: BTCUSDT
+          margin_type: CROSSED # CROSSED, ISOLATED
+          order_type: MARKET # MARKET, LIMIT
+          rounds:
+            - round: 1
+              amount: 0.015 # size
+              leverage: 2 # 1-125x
+              interval: 1d
+              fast_ema: 12
+              slow_ema: 26
+      
+      - market: ETH-USDT
+        bindings:
+        - exchange: binance_future
+          market_name: ETHUSDT
+          margin_type: CROSSED # CROSSED, ISOLATED
+          order_type: MARKET # MARKET, LIMIT
+          rounds:
+            - round: 1
+              amount: 0.2
+              leverage: 2 # 1-125x
+              interval: 1d
+              fast_ema: 12
+              slow_ema: 26
+
+      - market: BNB-USDT
+        bindings:
+        - exchange: binance_future
+          market_name: BNBUSDT
+          margin_type: CROSSED # CROSSED, ISOLATED
+          order_type: MARKET # MARKET, LIMIT
+          rounds:
+            - round: 1
+              amount: 2
+              leverage: 2 # 1-125x
+              interval: 1d
+              fast_ema: 12
+              slow_ema: 26

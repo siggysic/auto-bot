@@ -22,7 +22,6 @@ import (
 	"strings"
 
 	helpers "github.com/saniales/golang-crypto-trading-bot/bot_helpers"
-	"github.com/saniales/golang-crypto-trading-bot/consts"
 	"github.com/saniales/golang-crypto-trading-bot/environment"
 	"github.com/saniales/golang-crypto-trading-bot/exchanges"
 	"github.com/saniales/golang-crypto-trading-bot/strategies"
@@ -87,13 +86,6 @@ func executeStartCommand(cmd *cobra.Command, args []string) {
 				BaseCurrency:   currencies[0],
 				MarketCurrency: currencies[1],
 			}
-
-			// [TODO] hard code config token channel discord
-			mkts[i].CustomStorageM = make(map[string]string)
-			mkts[i].CustomStorageM[consts.DiscordTokenStorage] = strategyConf.DiscordToken
-			mkts[i].CustomStorageM[consts.DiscordChannelIdStorage] = strategyConf.DiscordChannelId
-			mkts[i].CustomStorageM[consts.DiscordNotiGapMinuteStorage] = fmt.Sprintf("%d", strategyConf.DiscordNotiGapMinute)
-			mkts[i].CustomStorageM[consts.MongoURIStorage] = botConfig.MongoURI
 
 			mkts[i].ExchangeNames = make(map[string]string, len(wrappers))
 

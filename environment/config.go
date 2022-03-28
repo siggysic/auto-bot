@@ -78,6 +78,10 @@ type CoinRounds struct {
 	Target              float64      `yaml:"target"`
 	TargetType          TargetType   `yaml:"target_type"`
 	TrailingStopPercent *float64     `yaml:"trailing_acceptable_percent"`
+
+	Interval string `yaml:"interval"`
+	FastEMA  int    `yaml:"fast_ema"`
+	SlowEMA  int    `yaml:"slow_ema"`
 }
 
 // BotConfig contains all config data of the bot, which can be also loaded from config file.
